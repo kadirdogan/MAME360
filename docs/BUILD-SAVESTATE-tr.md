@@ -4,7 +4,7 @@ Temel: mLoaDs/MAME360 `63a21cfce35d42333885031cf2fe221808c44016`.
 
 ## Durum
 
-Save/load konsolda kullanıcı tarafından çalışır olarak bildirildi; oynanan oyun daha sonra Shinobi bootleg olarak tanımlandı. Favorilerin bilgisayar testleri geçti; konsol doğrulaması ayrıca raporlanmadı. Ses kodu değiştirilmedi. Yeni özellikler tüm sürücüler için eksiksiz state desteği sağlamaz.
+Save/load ve favori listesi konsolda test edildi, çalıştığı görüldü.  
 
 ## Xbox derlemesi
 
