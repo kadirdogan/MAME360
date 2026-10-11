@@ -1,3 +1,18 @@
+# MAME360 — SS2 save/load ve favoriler prototipi
+
+MAME72 Release 11 kaynak ağacına mevcut MAME state API’leriyle kontrolcü kısayolları ve kalıcı favoriler ekler.
+
+- **Oyunda:** LB+RB+Y kaydet, LB+RB+X yükle; slot 0, dört kontrolcü.
+- **Oyun listesinde:** Y favori ekle/çıkar, X favori filtresi.
+- **Dosyalar:** `GAME:\sta\<romname>\0.sta`, `GAME:\favorites.txt`, `GAME:\debug.log`.
+- **Durum:** Save/load için kullanıcı konsol doğrulaması var; tüm oyunlar için garanti yok. Favorilerin konsol doğrulaması bekleniyor. Shinobi ses kodu değiştirilmedi.
+
+[Derleme ve test notları](docs/BUILD-SAVESTATE-tr.md)
+
+Temel kaynak: [mLoaDs/MAME360](https://github.com/mLoaDs/MAME360), `63a21cfce35d42333885031cf2fe221808c44016`. Aşağıdaki orijinal proje tanıtımı ve katkı sahipleri korunmuştur; tanıtımdaki genel uyumluluk iddiaları bu prototipin test garantisi değildir. Mevcut kaynak lisansları geçerlidir.
+
+---
+
 ![380443606-7db8b933-10f1-48a5-a70e-c79f623327cb](https://github.com/user-attachments/assets/ed4078aa-2272-46c7-8320-4e892dc565fc)
 
 # MAME360
