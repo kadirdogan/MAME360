@@ -14,6 +14,7 @@
 #include "osd_cpu.h"
 #include "osdepend.h"
 #include "inptport.h"
+#include "cpuexec.h"
 
 #include "xbox_JoystickMouse.h"
 #include "DebugLogger.h"
@@ -691,3 +692,30 @@ static void Helper_AddEntry( const char *name, INT32 code, INT32 standardCode, U
 
 
 
+
+/* Read every port directly; consume every edge even when two pads act together. */
+int osd_savestate_action(int reset)
+{
+	static int held[4] = { 1, 1, 1, 1 };
+	int pad, action = LOADSAVE_NONE;
+	for (pad = 0; pad < 4; ++pad) {
+		XINPUT_STATE state;
+		WORD buttons, face;
+		int chord, edge;
+		if (reset || XInputGetState(pad, &state) != ERROR_SUCCESS) {
+			held[pad] = 1;
+			continue;
+		}
+		buttons = state.Gamepad.wButtons;
+		face = buttons & (XINPUT_GAMEPAD_X | XINPUT_GAMEPAD_Y);
+		chord = (buttons & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER))
+			== (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER) && face;
+		edge = chord && !held[pad];
+		held[pad] = chord;
+		if (edge && action == LOADSAVE_NONE) {
+			if (face == XINPUT_GAMEPAD_Y) action = LOADSAVE_SAVE;
+			if (face == XINPUT_GAMEPAD_X) action = LOADSAVE_LOAD;
+		}
+	}
+	return action;
+}

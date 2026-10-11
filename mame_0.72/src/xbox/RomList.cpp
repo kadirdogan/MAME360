@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
+#include <sstream>
 #include "xbox_Mame.h"
 #include "xbox_FileIO.h"
 #include "main.h"
@@ -52,15 +54,159 @@ static int CurrentFilter = 0;
 char rom_filename[256];
 
 
-wchar_t ucString[42];
+wchar_t ucString[512];
 
 HXUIOBJ hRomListScene;
 HXUIOBJ hOptionsScene = NULL;
 
+
+// ROM short names are persistent IDs; labels and list indices are never IDs.
+static vector<int> s_availableDrivers, s_visibleDrivers;
+static set<string> s_favorites;
+static bool s_favoritesOnly = false, s_favoritesLoaded = false;
+static bool s_favoritesWritable = true;
+
+static void FavoriteStatus(const wchar_t *text)
+{
+    HXUIOBJ label = NULL;
+    if (hRomListScene) {
+        XuiElementGetChildById(hRomListScene, L"XuiNumberOfRoms", &label);
+        if (label) XuiTextElementSetText(label, text);
+    }
+}
+
+static void LoadFavorites()
+{
+    if (s_favoritesLoaded) return;
+    s_favoritesLoaded = true;
+    HANDLE file = CreateFileA("GAME:\\favorites.txt", GENERIC_READ, FILE_SHARE_READ,
+        NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) {
+        DWORD error = GetLastError();
+        s_favoritesWritable = error == ERROR_FILE_NOT_FOUND;
+        if (!s_favoritesWritable) logerror("[FAVORITES] Read open failed: %lu\n", error);
+        return;
+    }
+    LARGE_INTEGER size;
+    DWORD count = 0;
+    if (!GetFileSizeEx(file, &size) || size.QuadPart < 0 || size.QuadPart > 1048576) {
+        s_favoritesWritable = false;
+    } else {
+        vector<char> bytes((size_t)size.QuadPart + 1, 0);
+        if (!ReadFile(file, &bytes[0], (DWORD)size.QuadPart, &count, NULL)
+            || count != (DWORD)size.QuadPart) s_favoritesWritable = false;
+        else {
+            istringstream lines(string(&bytes[0], count));
+            string name;
+            while (getline(lines, name)) {
+                if (!name.empty() && name[name.size()-1] == '\r') name.erase(name.size()-1);
+                if (name.empty()) continue;
+                if (name.size() > 63 || name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != string::npos) {
+                    s_favoritesWritable = false;
+                    break;
+                }
+                s_favorites.insert(name);
+            }
+        }
+    }
+    CloseHandle(file);
+    if (!s_favoritesWritable) logerror("[FAVORITES] Invalid or unreadable favorites.txt; changes disabled\n");
+}
+
+static bool SaveFavorites(const set<string>& names)
+{
+    if (!s_favoritesWritable) return false;
+    string data;
+    for (set<string>::const_iterator i = names.begin(); i != names.end(); ++i) data += *i + "\r\n";
+    HANDLE file = CreateFileA("GAME:\\favorites.tmp", GENERIC_WRITE, 0, NULL,
+        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) {
+        logerror("[FAVORITES] Write open failed: %lu\n", GetLastError());
+        return false;
+    }
+    DWORD written = 0;
+    bool ok = WriteFile(file, data.c_str(), (DWORD)data.size(), &written, NULL) != 0;
+    ok = ok && written == data.size();
+    if (ok) ok = FlushFileBuffers(file) != 0;
+    DWORD error = ok ? 0 : GetLastError();
+    if (!CloseHandle(file)) { ok = false; error = GetLastError(); }
+    if (ok && !MoveFileExA("GAME:\\favorites.tmp", "GAME:\\favorites.txt", MOVEFILE_REPLACE_EXISTING)) {
+        ok = false;
+        error = GetLastError();
+    }
+    if (!ok) logerror("[FAVORITES] Write/replace failed: %lu\n", error);
+    return ok;
+}
+
+static bool DriverLess(int a, int b)
+{
+    int order = strcmp(drivers[a]->description, drivers[b]->description);
+    return order ? order < 0 : strcmp(drivers[a]->name, drivers[b]->name) < 0;
+}
+
+void CRomList::RebuildVisible(int selectedDriver, int fallback)
+{
+    DeleteItems(0, RomCount);
+    RomCount = 0;
+    s_visibleDrivers.clear();
+    m_vecAvailRomList.clear();
+    int selected = -1, favoriteCount = 0;
+    for (size_t i = 0; i < s_availableDrivers.size(); ++i) {
+        int driver = s_availableDrivers[i];
+        bool favorite = s_favorites.count(drivers[driver]->name) != 0;
+        if (favorite) ++favoriteCount;
+        if (s_favoritesOnly && !favorite) continue;
+        if (driver == selectedDriver) selected = (int)s_visibleDrivers.size();
+        s_visibleDrivers.push_back(driver);
+        m_vecAvailRomList.push_back(string(favorite ? "[*] " : "") + drivers[driver]->description);
+    }
+    RomCount = (int)s_visibleDrivers.size();
+    if (RomCount) {
+        InsertItems(0, RomCount);
+        if (selected < 0) selected = max(0, min(fallback, RomCount - 1));
+        XuiListSetCurSel(m_hObj, selected);
+        XuiListSetCurSelVisible(m_hObj, selected);
+    }
+    wchar_t status[128];
+    swprintf_s(status, L"%ls:%d Fav:%d | Y:+/- X:Filter",
+        s_favoritesOnly ? L"Favorites" : L"All", RomCount, favoriteCount);
+    FavoriteStatus(status);
+    if (!s_favoritesWritable) FavoriteStatus(L"favorites.txt error; changes disabled");
+}
+
+HRESULT CRomList::OnKeyDown(XUIMessageInput* input, BOOL& bHandled)
+{
+    if (input->dwKeyCode != VK_PAD_X && input->dwKeyCode != VK_PAD_Y) {
+        bHandled = FALSE;
+        return S_OK;
+    }
+    bHandled = TRUE;
+    if (input->dwFlags & XUI_INPUT_FLAG_REPEAT) return S_OK;
+    int index = XuiListGetCurSel(m_hObj, NULL);
+    int driver = index >= 0 && index < (int)s_visibleDrivers.size() ? s_visibleDrivers[index] : -1;
+    if (input->dwKeyCode == VK_PAD_X) {
+        s_favoritesOnly = !s_favoritesOnly;
+    } else {
+        if (driver < 0) return S_OK;
+        set<string> updated = s_favorites;
+        string name = drivers[driver]->name;
+        if (updated.count(name)) updated.erase(name); else updated.insert(name);
+        if (!SaveFavorites(updated)) {
+            FavoriteStatus(L"Favorite save failed: see debug.log");
+            return S_OK;
+        }
+        s_favorites.swap(updated);
+        logerror("[FAVORITES] %s: %s\n", s_favorites.count(name) ? "Added" : "Removed", name.c_str());
+    }
+    RebuildVisible(driver, index);
+    return S_OK;
+}
+
 LPCWSTR MultiCharToUniChar(char* mbString)
 {
-	int len = strlen(mbString) + 1;	
-	mbstowcs(ucString, mbString, len);
+	ucString[0] = 0;
+	mbstowcs(ucString, mbString, 511);
+	ucString[511] = 0;
 	return (LPCWSTR)ucString;
 }
 
@@ -86,6 +232,7 @@ const char *GetFilename (char *path, const char *InFileName, char *fext)
 
 void InRescanRomsFirstFunc(XUIMessage *pMsg, InRescanRomsStruct* pData, char *szPath)
 {
+    pData->szPath = szPath;
     XuiMessage(pMsg,XM_MESSAGE_ON_RESCAN_ROMS);
     _XuiMessageExtra(pMsg,(XUIMessageData*) pData, sizeof(*pData));
 
@@ -109,12 +256,13 @@ HRESULT CRomListScene::OnNotifyPress( HXUIOBJ hObjPressed,
         {
 			nIndex = m_RomList.GetCurSel();
 				
-			LPCWSTR romName = m_RomList.GetText(nIndex);
-			 
-			sprintf(rom,"%S",romName);
+            if (nIndex < 0 || nIndex >= (int)s_visibleDrivers.size()) {
+                bHandled = TRUE;
+                return S_OK;
+            }
+            drvIdx = s_visibleDrivers[nIndex];
+            nLastRom = nIndex;
 
-			drvIdx = mapRoms[rom];
-		 
 			main_mame(drvIdx);
 			
 			XuiRenderRestoreState(app.GetDC());
@@ -185,7 +333,7 @@ HRESULT CRomListScene::OnInit( XUIMessageInit* pInitData, BOOL& bHandled )
 		swprintf_s(LabelText,L"%S", LVERSION_STRING);
 
 		m_ListData.clear();
-		m_Version.SetText(LabelText);		 
+		m_Version.SetText(L"SS2+Fav");
 
 		CurrentFilter = nLastFilter;
 		XuiImageElementSetImagePath(m_PreviewImage.m_hObj, L"");
@@ -202,16 +350,18 @@ HRESULT CRomListScene::OnInit( XUIMessageInit* pInitData, BOOL& bHandled )
 
 		m_RomList.SetShow(true);
 		m_RomList.SetFocus();		
-		m_RomList.SetCurSel(nLastRom);
-		m_RomList.SetCurSelVisible(nLastRom);
+		if (!s_visibleDrivers.empty()) {
+            nLastRom = min(nLastRom, (int)s_visibleDrivers.size() - 1);
+            m_RomList.SetCurSel(nLastRom);
+            m_RomList.SetCurSelVisible(nLastRom);
+        }
 
 		bHandled = TRUE;
         return S_OK;
     }
 
-CRomList::CRomList()
+CRomList::CRomList() : RomCount(0), RomListOK(false)
 {
-  
 }
 int CRomList::InitRomList()
 {
@@ -265,11 +415,8 @@ HRESULT CRomList::OnNotify( XUINotify *hObj, BOOL& bHandled )
 	{
 		case XN_SELCHANGED:			 						 
 			nIndex = XuiListGetCurSel( this->m_hObj, NULL ); 
-			LPCWSTR romName = XuiListGetText(this->m_hObj, nIndex);
-			 
-			sprintf(rom,"%S",romName);
-
-			drvIdx = mapRoms[rom];
+            if (nIndex < 0 || nIndex >= (int)s_visibleDrivers.size()) return S_OK;
+            drvIdx = s_visibleDrivers[nIndex];
 
 			strcpy(TitleFName, GetFilename((char *)g_FileIOConfig.m_screenshotPath.c_str(),  drivers[drvIdx]->name , "png"));			 
  
@@ -345,9 +492,10 @@ HRESULT CRomList::OnRescanRoms( char *szPath,  BOOL& bHandled )
 	std::vector<std::string> vecAvailRomList;
 	std::vector<int>		 vecAvailRomIndex;
 
+	DeleteItems(0, RomCount);
 	InitRomList();
-
-	DeleteItems(0, m_vecAvailRomList.size());
+	s_visibleDrivers.clear();
+	s_availableDrivers.clear();
   
 	m_vecAvailRomList.clear();
 
@@ -392,7 +540,8 @@ HRESULT CRomList::OnRescanRoms( char *szPath,  BOOL& bHandled )
 						m_ListData.push_back(_strlwr(oFindData.cFileName));		
 					}
 				
-				} while (FindNextFile(hFind, &oFindData));	
+				} while (FindNextFile(hFind, &oFindData));
+                FindClose(hFind);
 			}
 		}
 		  
@@ -423,7 +572,7 @@ HRESULT CRomList::OnRescanRoms( char *szPath,  BOOL& bHandled )
 		for (unsigned int y = 0; y < m_ListData.size() ; y++) {
 			if (m_ListData[y] == vecAvailRomListFileName[x]) {
  				 
-				m_vecAvailRomList.push_back(drivers[x]->description);
+				s_availableDrivers.push_back(x);
 				//m_vecAvailRomReleasedBy.push_back(drivers[x]->manufacturer);						 
 				//m_vecAvailRomManufacturer.push_back(drivers[x]->year);
 							
@@ -434,14 +583,9 @@ HRESULT CRomList::OnRescanRoms( char *szPath,  BOOL& bHandled )
 
 	}
 
-	std::sort(m_vecAvailRomList.begin(), m_vecAvailRomList.end());
-
-
-	AvRoms();
-	InsertItems( 0, RomCount );
-	XuiElementGetChildById( hRomListScene, L"XuiNumberOfRoms", &hRomCountText );	 
-	swprintf(RomCountText,L"%d/%d Games Found",RomCount, totalMAMEGames);	 
-	XuiTextElementSetText(hRomCountText,RomCountText);
+    LoadFavorites();
+    std::sort(s_availableDrivers.begin(), s_availableDrivers.end(), DriverLess);
+    RebuildVisible(-1, nLastRom);
 
 	bHandled = TRUE;	
     return( S_OK );
@@ -478,7 +622,9 @@ HRESULT CRomList::OnGetSourceDataText(
     
     if( ( 0 == pGetSourceTextData->iData ) && ( ( pGetSourceTextData->bItemData ) ) ) {
 
-			LPCWSTR lpszwBuffer = MultiCharToUniChar((char *)m_vecAvailRomList[pGetSourceTextData->iItem].c_str());
+			LPCWSTR lpszwBuffer = L"";
+            if (pGetSourceTextData->iItem >= 0 && pGetSourceTextData->iItem < (int)m_vecAvailRomList.size())
+                lpszwBuffer = MultiCharToUniChar((char *)m_vecAvailRomList[pGetSourceTextData->iItem].c_str());
 
             pGetSourceTextData->szText = lpszwBuffer;
 

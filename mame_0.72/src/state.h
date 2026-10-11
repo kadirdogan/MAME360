@@ -33,14 +33,15 @@ void state_save_register_func_postload(void (*func)(void));
 
 /* Save and load functions */
 /* The tags are a hack around the current cpu structures */
-void state_save_save_begin(mame_file *file);
+/* Save begin/finish and load begin return 0 on success, 1 on failure. */
+int  state_save_save_begin(mame_file *file);
 int  state_save_load_begin(mame_file *file);
 
 void state_save_set_current_tag(int tag);
 void state_save_save_continue(void);
 void state_save_load_continue(void);
 
-void state_save_save_finish(void);
+int  state_save_save_finish(void);
 void state_save_load_finish(void);
 
 /* Display function */

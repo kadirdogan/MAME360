@@ -92,7 +92,7 @@ static mame_file *ss_dump_file;
 static unsigned int ss_dump_size;
 
 
-static UINT32 ss_get_signature(void)
+static int ss_get_signature(UINT32 *result)
 {
 	ss_module *m;
 	unsigned int size = 0, pos = 0;
@@ -112,7 +112,11 @@ static UINT32 ss_get_signature(void)
 		}
 	}
 
-	info = malloc(size);
+	info = malloc(size ? size : 1);
+	if (!info) {
+		logerror("[SAVESTATE] Failed: signature allocation failed\n");
+		return 1;
+	}
 
 	// Pass 2 : write signature info
 
@@ -139,7 +143,8 @@ static UINT32 ss_get_signature(void)
 	signature = crc32(0, (unsigned char *)info, size);
 
 	free(info);
-	return signature;
+	*result = signature;
+	return 0;
 }
 
 void state_save_reset(void)
@@ -382,10 +387,14 @@ static void ss_c8(unsigned char *data, unsigned size)
 }
 
 
-void state_save_save_begin(mame_file *file)
+int state_save_save_begin(mame_file *file)
 {
 	ss_module *m;
 	TRACE(logerror("Beginning save\n"));
+	if (strlen(Machine->gamedrv->name) > 10) {
+		logerror("[SAVESTATE] Failed: ROM name exceeds version-1 header\n");
+		return 1;
+	}
 	ss_dump_size = 0x18;
 	ss_dump_file = file;
 	for(m = ss_registry; m; m=m->next) {
@@ -403,8 +412,12 @@ void state_save_save_begin(mame_file *file)
 	ss_dump_array = malloc(ss_dump_size);
 	if (ss_dump_array == NULL)
 	{
-		logerror ("malloc failed in state_save_save_begin\n");
+		logerror("[SAVESTATE] Failed: save buffer allocation failed\n");
+		ss_dump_file = 0;
+		ss_dump_size = 0;
+		return 1;
 	}
+	return 0;
 }
 
 void state_save_save_continue(void)
@@ -446,14 +459,16 @@ void state_save_save_continue(void)
 	}
 }
 
-void state_save_save_finish(void)
+int state_save_save_finish(void)
 {
 	UINT32 signature;
+	int failed = 1;
 	unsigned char flags = 0;
 
 	TRACE(logerror("Finishing save\n"));
 
-	signature = ss_get_signature();
+	if (ss_get_signature(&signature))
+		goto done;
 	if(!Machine->sample_rate)
 		flags |= SS_NO_SOUND;
 
@@ -465,83 +480,91 @@ void state_save_save_finish(void)
 	ss_dump_array[8] = 1;
 	ss_dump_array[9] = flags;
 	memset(ss_dump_array+0xa, 0, 10);
-	strcpy((char *)ss_dump_array+0xa, Machine->gamedrv->name);
+	memcpy(ss_dump_array+0xa, Machine->gamedrv->name, strlen(Machine->gamedrv->name));
 
 	ss_dump_array[0x14] = signature;
 	ss_dump_array[0x15] = signature >> 8;
 	ss_dump_array[0x16] = signature >> 16;
 	ss_dump_array[0x17] = signature >> 24;
 
-	mame_fwrite(ss_dump_file, ss_dump_array, ss_dump_size);
+	failed = mame_fwrite(ss_dump_file, ss_dump_array, ss_dump_size) != ss_dump_size;
+	if (failed)
+		logerror("[SAVESTATE] Failed: state write incomplete or flush failed\n");
+done:
 	free(ss_dump_array);
 	ss_dump_array = 0;
 	ss_dump_size = 0;
 	ss_dump_file = 0;
+	return failed;
 }
 
 int state_save_load_begin(mame_file *file)
 {
 	ss_module *m;
-	unsigned int offset = 0;
+	unsigned int offset = 0x18;
 	UINT32 signature, file_sig;
+	unsigned char game[10] = {0};
 
-	TRACE(logerror("Beginning load\n"));
-
-	signature = ss_get_signature();
-
-	ss_dump_size = mame_fsize(file);
-	ss_dump_array = malloc(ss_dump_size);
-	ss_dump_file = file;
-	mame_fread(ss_dump_file, ss_dump_array, ss_dump_size);
-
-	if(memcmp(ss_dump_array, "MAMESAVE", 8)) {
-		usrintf_showmessage("Error: This is not a mame save file");
-		goto bad;
-	}
-
-	if(ss_dump_array[8] != 1) {
-		usrintf_showmessage("Error: Wrong version in save file (%d, 1 expected)",
-							ss_dump_array[8]);
-		goto bad;
-	}
-
-	file_sig = ss_dump_array[0x14]
-		| (ss_dump_array[0x15] << 8)
-		| (ss_dump_array[0x16] << 16)
-		| (ss_dump_array[0x17] << 24);
-
-	if(file_sig != signature) {
-		usrintf_showmessage("Error: Incompatible save file (signature %08x, expected %08x)",
-							file_sig, signature);
-		goto bad;
-	}
-
-	if(ss_dump_array[9] & SS_NO_SOUND)
-	{
-		if(Machine->sample_rate)
-			usrintf_showmessage("Warning: Game was saved with sound off, but sound is on.  Result may be interesting.");
-	}
-	else
-	{
-		if(!Machine->sample_rate)
-			usrintf_showmessage("Warning: Game was saved with sound on, but sound is off.  Result may be interesting.");
-	}
-
-	offset = 0x18;
-	for(m = ss_registry; m; m=m->next) {
+	/* Validate the entire transaction before modifying registered state. */
+	if (ss_get_signature(&signature))
+		return 1;
+	for (m = ss_registry; m; m = m->next) {
 		int i;
-		for(i=0; i<MAX_INSTANCES; i++) {
+		for (i = 0; i < MAX_INSTANCES; i++) {
 			ss_entry *e;
-			for(e = m->instances[i]; e; e=e->next) {
+			for (e = m->instances[i]; e; e = e->next) {
 				e->offset = offset;
-				offset += ss_size[e->type]*e->size;
+				offset += ss_size[e->type] * e->size;
 			}
 		}
 	}
+	if (mame_fsize(file) != offset) {
+		logerror("[SAVESTATE] Failed: truncated or incompatible state size\n");
+		return 1;
+	}
+	ss_dump_size = offset;
+	ss_dump_file = file;
+	ss_dump_array = malloc(ss_dump_size);
+	if (!ss_dump_array) {
+		logerror("[SAVESTATE] Failed: load buffer allocation failed\n");
+		goto bad;
+	}
+	if (mame_fread(file, ss_dump_array, ss_dump_size) != ss_dump_size) {
+		logerror("[SAVESTATE] Failed: state read incomplete\n");
+		goto bad;
+	}
+	if (memcmp(ss_dump_array, "MAMESAVE", 8) || ss_dump_array[8] != 1) {
+		logerror("[SAVESTATE] Failed: invalid state header or version\n");
+		goto bad;
+	}
+	if (strlen(Machine->gamedrv->name) > sizeof(game)) {
+		logerror("[SAVESTATE] Failed: ROM name exceeds version-1 header\n");
+		goto bad;
+	}
+	memcpy(game, Machine->gamedrv->name, strlen(Machine->gamedrv->name));
+	if (memcmp(ss_dump_array + 0xa, game, sizeof(game))) {
+		logerror("[SAVESTATE] Failed: state belongs to another ROM\n");
+		goto bad;
+	}
+	file_sig = (UINT32)ss_dump_array[0x14]
+		| ((UINT32)ss_dump_array[0x15] << 8)
+		| ((UINT32)ss_dump_array[0x16] << 16)
+		| ((UINT32)ss_dump_array[0x17] << 24);
+	if (file_sig != signature) {
+		logerror("[SAVESTATE] Failed: incompatible registration signature\n");
+		goto bad;
+	}
+	if ((ss_dump_array[9] & ~(SS_NO_SOUND | SS_MSB_FIRST)) ||
+		!!(ss_dump_array[9] & SS_NO_SOUND) != !Machine->sample_rate) {
+		logerror("[SAVESTATE] Failed: incompatible state flags or sound setting\n");
+		goto bad;
+	}
 	return 0;
-
- bad:
+bad:
 	free(ss_dump_array);
+	ss_dump_array = 0;
+	ss_dump_size = 0;
+	ss_dump_file = 0;
 	return 1;
 }
 

@@ -33,6 +33,7 @@
 struct _osd_file
 {
   HANDLE		m_handle;
+  BOOL      m_isState;
   UINT64		m_filepos;
   UINT64		m_end;
   UINT64		m_offset;
@@ -116,8 +117,11 @@ void InitializeFileIO( void )
                                     tempStr;
 
   CREATEOROPENPATH( g_FileIOConfig.m_NVramPath.c_str(), TRUE );
-	g_pathNames[FILETYPE_NVRAM][0] = g_pathNames[FILETYPE_STATE][0] =
+	g_pathNames[FILETYPE_NVRAM][0] =
 	                                 g_pathNames[FILETYPE_MEMCARD][0] = tempStr;
+
+  // Dedicated prototype root; osd_fopen creates missing subdirectories.
+  g_pathNames[FILETYPE_STATE][0] = strdup("GAME:\\sta");
 
   CREATEOROPENPATH( g_FileIOConfig.m_HDImagePath.c_str(), FALSE );
   g_pathNames[FILETYPE_IMAGE][0] = tempStr;
@@ -281,6 +285,9 @@ osd_file *osd_fopen( int pathtype, int pathindex, const char *filename, const ch
   LARGE_INTEGER fileSize;
 
 	PRINTMSG(( T_TRACE, "osd_fopen" ));
+	/* Never silently save into the legacy autoboot fallback directory. */
+	if (pathtype == FILETYPE_STATE && pathindex != 0 && strchr(mode, 'w'))
+		return NULL;
 
     // The calloc is important here, if it's taken away
     // it will cause odd behavior if the caller doesn't do
@@ -291,6 +298,8 @@ osd_file *osd_fopen( int pathtype, int pathindex, const char *filename, const ch
 		PRINTMSG(( T_ERROR, "Malloc failed creating osd_file instance!" ));
 		return NULL;
 	}
+
+	ret->m_isState = (pathtype == FILETYPE_STATE);
 
 	if( strchr( mode, 'r' ) )
 	{
@@ -345,6 +354,9 @@ osd_file *osd_fopen( int pathtype, int pathindex, const char *filename, const ch
       // Return if read only or some other error
       if( !(dwDesiredAccess & GENERIC_WRITE) || err != ERROR_PATH_NOT_FOUND )
       {
+        err = GetLastError();
+        if (ret->m_isState)
+          logerror("[SAVESTATE] Failed: open %s (error %lu)\n", strFullPath.c_str(), err);
         PRINTMSG(( T_ERROR, "Failed opening file %s: 0x%X!", strFullPath.c_str(), err ));
         free( ret );
         return NULL;
@@ -363,6 +375,9 @@ osd_file *osd_fopen( int pathtype, int pathindex, const char *filename, const ch
       // if that doesn't work, we give up
       if( ret->m_handle == INVALID_HANDLE_VALUE )
       {
+        err = GetLastError();
+        if (ret->m_isState)
+          logerror("[SAVESTATE] Failed: open %s (error %lu)\n", strFullPath.c_str(), err);
         PRINTMSG(( T_ERROR, "Failed opening file %s: 0x%X!", strFullPath.c_str(), err ));
         free( ret );
         return NULL;
@@ -490,7 +505,7 @@ UINT32 osd_fread( osd_file *file, void *buffer, UINT32 length )
 {
   UINT32 bytes_left = length;
   UINT32 bytes_to_copy;
-  DWORD result;
+  DWORD result = 0;
 
   osd_fflush( file );
 
@@ -556,6 +571,24 @@ UINT32 osd_fread( osd_file *file, void *buffer, UINT32 length )
 UINT32 osd_fwrite( osd_file *file, const void *buffer, UINT32 length )
 {
   DWORD result;
+
+  if (file->m_isState) {
+    result = 0;
+    file->m_bufferbytes = 0;
+    if (!WriteFile(file->m_handle, buffer, length, &result, NULL)) {
+      logerror("[SAVESTATE] Failed: WriteFile error %lu\n", GetLastError());
+      return 0;
+    }
+    file->m_filepos += result;
+    file->m_offset += result;
+    if (file->m_offset > file->m_end)
+      file->m_end = file->m_offset;
+    if (!FlushFileBuffers(file->m_handle)) {
+      logerror("[SAVESTATE] Failed: FlushFileBuffers error %lu\n", GetLastError());
+      return 0;
+    }
+    return result;
+  }
 
   // invalidate any buffered read data
   file->m_bufferbytes = 0;
@@ -652,7 +685,7 @@ void Helper_CreateDirectoryPath( const char *path, BOOL has_filename )
 
 		// if the path already exists, we're done
 	attributes = GetFileAttributes(path);
-	if( attributes >= 0 )
+	if( attributes != (DWORD)-1 )
 		return;
 
 		// create the path

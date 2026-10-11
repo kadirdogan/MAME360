@@ -376,6 +376,9 @@ static void cpu_post_run(void)
 
 void cpu_run(void)
 {
+#ifdef _XBOX
+	int savestate_frame;
+#endif
 #ifdef MAME_DEBUG
 	/* initialize the debugger */
 	if (mame_debug)
@@ -388,6 +391,11 @@ void cpu_run(void)
 	{
 		/* prepare everything to run */
 		cpu_pre_run();
+#ifdef _XBOX
+		savestate_frame = -1;
+		osd_savestate_action(1);
+		logerror("[SAVESTATE] SS2 ready: LB+RB+Y Save / LB+RB+X Load\n");
+#endif
 
 		/* loop until the user quits or resets */
 		time_to_reset = 0;
@@ -395,6 +403,24 @@ void cpu_run(void)
 		{
 			profiler_mark(PROFILER_EXTRA);
 
+#ifdef _XBOX
+			if (savestate_frame != current_frame) {
+				int action;
+				savestate_frame = current_frame;
+				action = osd_savestate_action(0);
+				if (action != LOADSAVE_NONE) {
+					char name[256];
+					if (loadsave_schedule != LOADSAVE_NONE)
+						logerror("[SAVESTATE] Failed: another request is pending\n");
+					else {
+						logerror("[SAVESTATE] %s requested: %s slot 0\n",
+							action == LOADSAVE_SAVE ? "Save" : "Load", Machine->gamedrv->name);
+						sprintf(name, "%s\\0", Machine->gamedrv->name);
+						cpu_loadsave_schedule_file(action, name);
+					}
+				}
+			}
+#endif
 			/* if we have a load/save scheduled, handle it */
 			if (loadsave_schedule != LOADSAVE_NONE)
 				handle_loadsave();
@@ -472,7 +498,11 @@ static void handle_save(void)
 	if (file)
 	{
 		/* write the save state */
-		state_save_save_begin(file);
+		if (state_save_save_begin(file)) {
+			mame_fclose(file);
+			cpu_loadsave_reset();
+			return;
+		}
 
 		/* write tag 0 */
 		state_save_set_current_tag(0);
@@ -494,12 +524,14 @@ static void handle_save(void)
 		}
 
 		/* finish and close */
-		state_save_save_finish();
+		if (!state_save_save_finish())
+			logerror("[SAVESTATE] Save OK\n");
+		state_save_set_current_tag(0);
 		mame_fclose(file);
 	}
 	else
 	{
-		usrintf_showmessage("Error: Failed to save state");
+		logerror("[SAVESTATE] Failed: cannot open state for writing\n");
 	}
 
 	/* unschedule the save */
@@ -549,12 +581,14 @@ static void handle_load(void)
 
 			/* finish and close */
 			state_save_load_finish();
+			state_save_set_current_tag(0);
+			logerror("[SAVESTATE] Load OK\n");
 		}
 		mame_fclose(file);
 	}
 	else
 	{
-		usrintf_showmessage("Error: Failed to load state");
+		logerror("[SAVESTATE] Failed: state missing or cannot open for reading\n");
 	}
 
 	/* unschedule the load */
@@ -599,6 +633,8 @@ void cpu_loadsave_schedule_file(int type, const char *name)
 		strcpy(loadsave_schedule_name, name);
 		loadsave_schedule = type;
 	}
+	else
+		logerror("[SAVESTATE] Failed: request allocation failed\n");
 }
 
 

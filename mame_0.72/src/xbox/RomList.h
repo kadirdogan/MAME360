@@ -46,6 +46,7 @@ public:
 
 	XUI_BEGIN_MSG_MAP()
 		XUI_ON_XM_INIT(OnInit)
+		XUI_ON_XM_KEYDOWN(OnKeyDown)
 		XUI_ON_XM_GET_SOURCE_TEXT(OnGetSourceDataText)
 		XUI_ON_XM_GET_ITEMCOUNT_ALL(OnGetItemCountAll)	 
 		XUI_ON_XM_NOTIFY( OnNotify )
@@ -53,6 +54,8 @@ public:
 	XUI_END_MSG_MAP()
 
 	CRomList();
+	HRESULT OnKeyDown(XUIMessageInput* input, BOOL& bHandled);
+	void RebuildVisible(int selectedDriver, int fallback);
 
 	int FreeRomList();
 	int AvRoms();

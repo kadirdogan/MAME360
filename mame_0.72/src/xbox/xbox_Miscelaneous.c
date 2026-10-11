@@ -13,6 +13,7 @@
 
 #include "mame.h"
 #include "cpuexec.h"
+#include "usrintrf.h"
 #include "palette.h"
 #include "common.h"
 
@@ -267,15 +268,26 @@ void osd_pause( int paused )
 //---------------------------------------------------------------------
 void __cdecl logerror( const char *fmt, ... )
 {
-#ifdef ENABLE_LOGERROR
   char buf[1024] = {0};
-
+  int savestate = strncmp(fmt, "[SAVESTATE]", 11) == 0;
+  int favorites = strncmp(fmt, "[FAVORITES]", 11) == 0;
   va_list arg;
-  va_start( arg, fmt );
-  vsnprintf( buf, 1023, fmt, arg );
-  va_end( arg );
-
-	PRINTMSG(( T_ERROR, buf ));
+#ifndef ENABLE_LOGERROR
+  if (!savestate && !favorites)
+    return;
+#endif
+  va_start(arg, fmt);
+  vsnprintf(buf, sizeof(buf) - 1, fmt, arg);
+  va_end(arg);
+  if (savestate || favorites) {
+    OutputDebugStringA(buf);
+    if (savestate)
+      usrintf_showmessage_secs(5, "%.180s", buf);
+    PRINTMSG_TO_LOG((T_INFO, "%s", buf));
+  }
+#ifdef ENABLE_LOGERROR
+  else
+    PRINTMSG((T_ERROR, "%s", buf));
 #endif
 }
 

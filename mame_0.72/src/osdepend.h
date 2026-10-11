@@ -393,6 +393,12 @@ void CLIB_DECL logerror(const char *text,...)
 void CLIB_DECL logerror(const char *text,...);
 #endif
 
+
+#ifdef _XBOX
+/* Prototype: controller 1, rising chord edge; reset suppresses held buttons. */
+int osd_savestate_action(int reset);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

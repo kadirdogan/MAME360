@@ -1,0 +1,14 @@
+# Local Xbox builds and machine-specific helper project
+**/Release_LTCG/
+**/Debug_LTCG/
+**/Debug/
+**/ipch/
+*.suo
+*.user
+*.sdf
+*.opensdf
+*.xex
+*.pdb
+mame_0.72/savestate-build.vcxproj
+tests/generated/
+__pycache__/
