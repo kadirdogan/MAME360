@@ -3,7 +3,7 @@
 MAME72 Release 11 kaynak ağacına mevcut MAME state API’leriyle kontrolcü kısayolları ve kalıcı favoriler ekler.
 
 - **Oyunda:** LB+RB+Y kaydet, LB+RB+X yükle; slot 0, dört kontrolcü.
-- **Oyun listesinde:** Y favori ekle/çıkar, X favori filtresi.
+- **Oyun listesinde:** Y Options, LB+Y favori ekle/çıkar, X favori filtresi.
 - **Dosyalar:** `GAME:\sta\<romname>\0.sta`, `GAME:\favorites.txt`, `GAME:\debug.log`.
 - **Durum:** Save/load için kullanıcı konsol doğrulaması var; tüm oyunlar için garanti yok. Favorilerin konsol doğrulaması bekleniyor. Shinobi ses kodu değiştirilmedi.
 

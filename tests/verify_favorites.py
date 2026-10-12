@@ -39,7 +39,15 @@ struct LARGE_INTEGER { long long QuadPart; };
 #define VK_PAD_X 0x5802
 #define VK_PAD_Y 0x5803
 #define XUI_INPUT_FLAG_REPEAT 1
-struct XUIMessageInput { DWORD dwKeyCode, dwFlags; };
+struct XUIMessageInput { DWORD dwKeyCode, dwFlags; unsigned char UserIndex; };
+#define ERROR_SUCCESS 0
+#define XINPUT_GAMEPAD_LEFT_SHOULDER 0x100
+struct XINPUT_STATE { struct { unsigned short wButtons; } Gamepad; };
+static unsigned short padButtons[4];
+static int padDisconnected[4];
+static int XInputGetState(unsigned int port, XINPUT_STATE *state) {
+    assert(port < 4); state->Gamepad.wButtons = padButtons[port]; return padDisconnected[port];
+}
 struct GameDriver { const char *name, *description; };
 GameDriver game0={"shinobi", "Same title"}, game1={"clone", "Same title"}, game2={"other", "Z title"};
 const GameDriver* drivers[]={&game0,&game1,&game2,0};
@@ -93,12 +101,23 @@ int main() {
     CRomList list; s_availableDrivers.push_back(0); s_availableDrivers.push_back(1); s_availableDrivers.push_back(2);
     sort(s_availableDrivers.begin(),s_availableDrivers.end(),DriverLess);
     list.RebuildVisible(0,0); assert(s_visibleDrivers[selection]==0);
-    XUIMessageInput key={VK_PAD_Y,0}; BOOL handled=0;
+    XUIMessageInput key={VK_PAD_Y,0,2}; BOOL handled=0;
+    int initialWrites=writes;
+    list.OnKeyDown(&key,handled); assert(!handled && writes==initialWrites);
+    padButtons[0]=XINPUT_GAMEPAD_LEFT_SHOULDER;
+    list.OnKeyDown(&key,handled); assert(!handled && writes==initialWrites);
+    padButtons[2]=XINPUT_GAMEPAD_LEFT_SHOULDER;
+    padDisconnected[2]=1;
+    list.OnKeyDown(&key,handled); assert(!handled && writes==initialWrites);
+    padDisconnected[2]=0;
+    key.UserIndex=255;
+    list.OnKeyDown(&key,handled); assert(!handled && writes==initialWrites);
+    key.UserIndex=2;
     list.OnKeyDown(&key,handled); assert(handled && s_favorites.count("shinobi"));
     assert(files["GAME:\\favorites.txt"]=="shinobi\r\n");
     assert(s_visibleDrivers[selection]==0 && list.m_vecAvailRomList[selection].find("[*] ")==0);
-    key.dwFlags=1; int oldWrites=writes; list.OnKeyDown(&key,handled); assert(writes==oldWrites);
-    key.dwFlags=0; key.dwKeyCode=VK_PAD_X; list.OnKeyDown(&key,handled);
+    padButtons[2]=0; key.dwFlags=1; int oldWrites=writes; list.OnKeyDown(&key,handled); assert(writes==oldWrites);
+    padButtons[2]=XINPUT_GAMEPAD_LEFT_SHOULDER; key.dwFlags=0; key.dwKeyCode=VK_PAD_X; list.OnKeyDown(&key,handled);
     assert(list.RomCount==1 && s_visibleDrivers[0]==0);
     key.dwKeyCode=VK_PAD_Y; list.OnKeyDown(&key,handled); assert(list.RomCount==0);
     list.OnKeyDown(&key,handled); assert(list.RomCount==0);
@@ -120,6 +139,7 @@ int main() {
     assert(!SaveFavorites(s_favorites));
     failure=1; reload(); assert(!s_favoritesWritable);
     failure=3; reload(); assert(!s_favoritesWritable);
+    puts("PASS: plain Y passes to Options; LB+Y uses event controller; disconnected/invalid ports; repeats consumed");
     puts("PASS: favorites persistence/reload, duplicate labels, missing ROM preservation, repeat suppression");
     puts("PASS: empty filter recovery, selection identity, open/short-write/flush/rename/read failure protection");
 }

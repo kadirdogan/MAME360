@@ -12,7 +12,7 @@ Save/load ve favori listesi konsolda test edildi, çalıştığı görüldü.
 2. Depodaki Xbox projesini kendi kurulumunuza göre hazırlayın. ATG Framework proje referansı kaynak projede eski/makineye özel bir konuma işaret edebilir; kendi XDK'nızın uyumlu ATG örnek projesine veya yerel kopyasına yönlendirin.
 3. `Release_LTCG | Xbox 360` yapılandırmasını derleyin. Otomatik konsola aktarım istemiyorsanız ilgili `Deploy` grubunda `ExcludedFromBuild=true` kullanın. Konsol bağlantı hatasını derleme hatasıyla karıştırmayın.
 4. Beklenen ana çıktı `mame_0.72/Release_LTCG/mame.xex` dosyasıdır. Denemede bu dosya `mame-ss2-favorites.xex` adıyla ayrıldı.
-5. Mevcut XEX'yi yedekleyin; yeni dosyayı mevcut media/config/ROM yapısıyla başlatın. `SS2+Fav` ve oyun açılışındaki `SS2 ready` mesajları sürümü ayırt eder.
+5. Mevcut XEX'yi yedekleyin; yeni dosyayı mevcut media/config/ROM yapısıyla başlatın. `SS2.1+Fav` ve oyun açılışındaki `SS2 ready` mesajları sürümü ayırt eder.
 
 Geliştirmede kurulu MSBuild 14, VS2010 `VCTargetsPath` ve XDK araçları kullanıldı. Yerel `savestate-build.vcxproj` ATG referansını yerel kopyaya yönlendiriyordu. Bu yardımcı proje makineye özel olduğu için commit edilmez. Bu belge sıfırdan kurulmuş her XDK sürümüyle tekrarlanmış bir derleme garantisi değildir.
 
@@ -20,7 +20,7 @@ Geliştirmede kurulu MSBuild 14, VS2010 `VCTargetsPath` ve XDK araçları kullan
 
 - LB+RB+Y: kaydet; LB+RB+X: yükle. Dört kontrolcü portu, tek slot 0.
 - `GAME:\sta\<romname>\0.sta`; log `GAME:\debug.log`.
-- Liste ekranında Y: favori ekle/çıkar; X: filtre.
+- Liste ekranında Y: Options; LB+Y: favori ekle/çıkar; X: filtre.
 - Favoriler `GAME:\favorites.txt`, geçici yazma dosyası `GAME:\favorites.tmp`.
 - `GAME:` yazılabilir olmalı. Kombinasyonu yeni işlemden önce bırakın.
 

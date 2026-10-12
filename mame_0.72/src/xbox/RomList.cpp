@@ -168,7 +168,7 @@ void CRomList::RebuildVisible(int selectedDriver, int fallback)
         XuiListSetCurSelVisible(m_hObj, selected);
     }
     wchar_t status[128];
-    swprintf_s(status, L"%ls:%d Fav:%d | Y:+/- X:Filter",
+    swprintf_s(status, L"%ls:%d Fav:%d | LB+Y:+/- X:Filter",
         s_favoritesOnly ? L"Favorites" : L"All", RomCount, favoriteCount);
     FavoriteStatus(status);
     if (!s_favoritesWritable) FavoriteStatus(L"favorites.txt error; changes disabled");
@@ -182,6 +182,16 @@ HRESULT CRomList::OnKeyDown(XUIMessageInput* input, BOOL& bHandled)
     }
     bHandled = TRUE;
     if (input->dwFlags & XUI_INPUT_FLAG_REPEAT) return S_OK;
+    /* Leave plain Y to the skin's existing Options shortcut. */
+    if (input->dwKeyCode == VK_PAD_Y) {
+        XINPUT_STATE pad;
+        if (input->UserIndex >= 4 ||
+            XInputGetState(input->UserIndex, &pad) != ERROR_SUCCESS ||
+            !(pad.Gamepad.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER)) {
+            bHandled = FALSE;
+            return S_OK;
+        }
+    }
     int index = XuiListGetCurSel(m_hObj, NULL);
     int driver = index >= 0 && index < (int)s_visibleDrivers.size() ? s_visibleDrivers[index] : -1;
     if (input->dwKeyCode == VK_PAD_X) {
@@ -333,7 +343,7 @@ HRESULT CRomListScene::OnInit( XUIMessageInit* pInitData, BOOL& bHandled )
 		swprintf_s(LabelText,L"%S", LVERSION_STRING);
 
 		m_ListData.clear();
-		m_Version.SetText(L"SS2+Fav");
+		m_Version.SetText(L"SS2.1+Fav");
 
 		CurrentFilter = nLastFilter;
 		XuiImageElementSetImagePath(m_PreviewImage.m_hObj, L"");
